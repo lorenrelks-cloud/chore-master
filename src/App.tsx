@@ -87,9 +87,13 @@ export default function App() {
         case "every_2_weeks": return widx % 2 === 0 ? 1 : 0;
         case "monthly": return (widx % 4 === (chore.id - 1) % 4) ? 1 : 0;
         case "quarterly": {
-          const order = [0, 2, 3]; // spread quarterly chores across cycle
-          const pos = chore.id % order.length;
-          return (widx % 4 === order[pos]) ? 1 : 0;
+          // Hard-map quarterly chores so they don’t stack in week 1
+          const map: Record<number, number> = {
+            18: 0, // Change Filter → Week 1
+            19: 2, // Clean baseboards → Week 3
+            20: 3, // Wash curtains → Week 4
+          };
+          return (widx % 4 === map[chore.id]) ? 1 : 0;
         }
         default: return 0;
       }
