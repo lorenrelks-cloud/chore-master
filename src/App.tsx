@@ -1,102 +1,133 @@
-import React, { useState, useEffect } from 'react';
+// src/App.tsx
+import React, { useState, useEffect } from "react";
 
-type Chore = {
+interface Chore {
   id: number;
   name: string;
   location: string;
   weight: number;
-  frequency: 'weekly' | 'monthly' | 'quarterly';
-};
+  frequency: "Weekly" | "Quarterly";
+}
+
+interface Assignment {
+  housemate: string;
+  chores: Chore[];
+  load: number;
+}
 
 const defaultChores: Chore[] = [
-  { id: 1, name: 'Dusting', location: 'Living Room', weight: 3, frequency: 'weekly' },
-  { id: 2, name: 'Clean sink', location: 'Kitchen', weight: 2, frequency: 'weekly' },
-  { id: 3, name: 'Sweep stairs', location: 'Stairs', weight: 3, frequency: 'weekly' },
-  { id: 4, name: 'Change Filter', location: 'Upstairs', weight: 4, frequency: 'quarterly' },
-  { id: 5, name: 'Clean baseboards', location: 'All Rooms', weight: 4, frequency: 'quarterly' },
+  { id: 1, name: "Clean sink", location: "Kitchen", weight: 2, frequency: "Weekly" },
+  { id: 2, name: "Sweep stairs", location: "Stairs", weight: 3, frequency: "Weekly" },
+  { id: 3, name: "Dusting", location: "Living Room", weight: 3, frequency: "Weekly" },
+  { id: 4, name: "Change Filter", location: "Upstairs", weight: 4, frequency: "Quarterly" },
+  { id: 5, name: "Clean baseboards", location: "All Rooms", weight: 4, frequency: "Quarterly" },
 ];
 
-const housemates = ['Loren', 'Zach', 'Tristyn'];
+const housemates = ["Loren", "Zach", "Tristyn"];
+const weeks = [1, 2, 3, 4];
 
-const App: React.FC = () => {
-  const [chores, setChores] = useState<Chore[]>(() => {
-    const saved = localStorage.getItem('chores');
-    return saved ? JSON.parse(saved) : defaultChores;
-  });
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'edit' | 'settings'>('dashboard');
+function App() {
+  const [chores, setChores] = useState<Chore[]>([]);
+  const [activeTab, setActiveTab] = useState<"dashboard" | "edit" | "settings">("dashboard");
 
+  // Load chores from localStorage or defaults
   useEffect(() => {
-    localStorage.setItem('chores', JSON.stringify(chores));
+    const stored = localStorage.getItem("chores");
+    if (stored) {
+      setChores(JSON.parse(stored));
+    } else {
+      setChores(defaultChores);
+    }
+  }, []);
+
+  // Persist chores
+  useEffect(() => {
+    localStorage.setItem("chores", JSON.stringify(chores));
   }, [chores]);
 
-  const resetToDefaults = () => {
-    setChores(defaultChores);
-    localStorage.setItem('chores', JSON.stringify(defaultChores));
-  };
+  // Balance chores with quarterly logic
+  const generateAssignments = (): Record<number, Assignment[]> => {
+    const results: Record<number, Assignment[]> = {};
+    weeks.forEach((week) => {
+      const assignments: Assignment[] = housemates.map((h) => ({ housemate: h, chores: [], load: 0 }));
 
-  const clearAllData = () => {
-    localStorage.clear();
-    window.location.reload();
-  };
+      // Quarterly chores: group task
+      const quarterly = chores.filter((c) => c.frequency === "Quarterly" && c.name.includes(week.toString()) === false);
+      if (quarterly.length > 0 && week === 1) {
+        quarterly.forEach((chore) => {
+          assignments.forEach((a) => {
+            a.chores.push(chore);
+            a.load += chore.weight;
+          });
+        });
+      }
 
-  const assignChores = () => {
-    const weeks: Record<number, Record<string, { tasks: Chore[]; load: number }>> = {};
-    for (let week = 1; week <= 4; week++) {
-      weeks[week] = {};
-      housemates.forEach(h => (weeks[week][h] = { tasks: [], load: 0 }));
-    }
+      // Weekly chores: random distribution until balanced
+      const weeklyChores = chores.filter((c) => c.frequency === "Weekly");
+      let pool = [...weeklyChores];
+      while (pool.length > 0) {
+        const chore = pool.pop();
+        if (!chore) break;
+        // Assign to lowest load person
+        const target = assignments.reduce((prev, curr) =>
+          curr.load < prev.load ? curr : prev
+        );
+        target.chores.push(chore);
+        target.load += chore.weight;
+      }
 
-    const weekly = chores.filter(c => c.frequency === 'weekly');
-    const monthly = chores.filter(c => c.frequency === 'monthly');
-    const quarterly = chores.filter(c => c.frequency === 'quarterly');
-
-    // Assign quarterly: group activity, all get same task that week
-    quarterly.forEach((chore, i) => {
-      const week = (i % 4) + 1;
-      housemates.forEach(h => {
-        weeks[week][h].tasks.push(chore);
-        weeks[week][h].load += chore.weight;
-      });
+      results[week] = assignments;
     });
-
-    const assignRandom = (choreList: Chore[], isMonthly = false) => {
-      choreList.forEach((chore, i) => {
-        const week = isMonthly ? ((i % 4) + 1) : ((Math.floor(Math.random() * 4)) + 1);
-        const mate = housemates[Math.floor(Math.random() * housemates.length)];
-        weeks[week][mate].tasks.push(chore);
-        weeks[week][mate].load += chore.weight;
-      });
-    };
-
-    assignRandom(weekly);
-    assignRandom(monthly, true);
-
-    return weeks;
+    return results;
   };
 
-  const schedule = assignChores();
+  const assignments = generateAssignments();
+
+  // Reset to defaults
+  const resetChores = () => setChores(defaultChores);
+
+  // Clear localStorage
+  const clearData = () => {
+    localStorage.clear();
+    setChores(defaultChores);
+  };
 
   return (
-    <div className="max-w-5xl mx-auto p-6">
+    <div className="p-6 font-sans bg-gray-50 min-h-screen">
       <h1 className="text-2xl font-bold text-blue-700 mb-4">Housemate Chore Balancer</h1>
-      <div className="flex space-x-4 border-b mb-6">
-        <button className={`pb-2 ${activeTab === 'dashboard' ? 'border-b-2 border-blue-500 font-semibold' : ''}`} onClick={() => setActiveTab('dashboard')}>Dashboard</button>
-        <button className={`pb-2 ${activeTab === 'edit' ? 'border-b-2 border-blue-500 font-semibold' : ''}`} onClick={() => setActiveTab('edit')}>Edit Chores</button>
-        <button className={`pb-2 ${activeTab === 'settings' ? 'border-b-2 border-blue-500 font-semibold' : ''}`} onClick={() => setActiveTab('settings')}>Settings</button>
+      <div className="flex gap-4 border-b mb-6">
+        <button
+          onClick={() => setActiveTab("dashboard")}
+          className={`pb-2 ${activeTab === "dashboard" ? "border-b-2 border-blue-500 font-semibold" : ""}`}
+        >
+          Dashboard
+        </button>
+        <button
+          onClick={() => setActiveTab("edit")}
+          className={`pb-2 ${activeTab === "edit" ? "border-b-2 border-blue-500 font-semibold" : ""}`}
+        >
+          Edit Chores
+        </button>
+        <button
+          onClick={() => setActiveTab("settings")}
+          className={`pb-2 ${activeTab === "settings" ? "border-b-2 border-blue-500 font-semibold" : ""}`}
+        >
+          Settings
+        </button>
       </div>
 
-      {activeTab === 'dashboard' && (
+      {activeTab === "dashboard" && (
         <div>
-          {Object.entries(schedule).map(([week, mates]) => (
+          {weeks.map((week) => (
             <div key={week} className="mb-6">
-              <h2 className="font-semibold mb-2">Week {week}</h2>
+              <h2 className="text-lg font-semibold mb-2">Week {week}</h2>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {Object.entries(mates).map(([mate, { tasks, load }]) => (
-                  <div key={mate} className="p-4 bg-white shadow rounded">
-                    <h3 className="font-semibold">{mate} <span className="text-sm text-gray-500">load {load}</span></h3>
-                    <ul className="list-disc list-inside text-sm mt-2">
-                      {tasks.map(t => (
-                        <li key={t.id}>{t.name} [{t.location}] (w{t.weight})</li>
+                {assignments[week].map((a) => (
+                  <div key={a.housemate} className="p-4 bg-white shadow rounded">
+                    <h3 className="font-bold">{a.housemate} <span className="text-sm font-normal text-gray-500">load {a.load}</span></h3>
+                    <ul className="list-disc ml-5">
+                      {a.chores.map((c) => (
+                        <li key={c.id}>{c.name} [{c.location}] (w{c.weight})</li>
                       ))}
                     </ul>
                   </div>
@@ -107,26 +138,28 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {activeTab === 'edit' && (
+      {activeTab === "edit" && (
         <div>
-          <h2 className="font-semibold mb-2">Edit Chores</h2>
-          <button onClick={resetToDefaults} className="mb-4 px-3 py-1 bg-yellow-500 text-white rounded">Reset to Defaults</button>
+          <h2 className="text-lg font-semibold mb-2">Edit Chores</h2>
+          <button onClick={resetChores} className="px-3 py-1 bg-yellow-400 text-black rounded mb-4">Reset to Defaults</button>
           <ul>
-            {chores.map(c => (
-              <li key={c.id} className="mb-2">{c.name} [{c.location}] (w{c.weight}, {c.frequency})</li>
+            {chores.map((c) => (
+              <li key={c.id}>{c.name} — {c.location} ({c.frequency})</li>
             ))}
           </ul>
         </div>
       )}
 
-      {activeTab === 'settings' && (
+      {activeTab === "settings" && (
         <div>
-          <h2 className="font-semibold mb-2">Settings</h2>
-          <button onClick={clearAllData} className="px-3 py-1 bg-red-600 text-white rounded">Clear saved data</button>
+          <h2 className="text-lg font-semibold mb-2">Settings</h2>
+          <button onClick={clearData} className="px-4 py-2 bg-red-600 text-white rounded">
+            Clear Saved Data
+          </button>
         </div>
       )}
     </div>
   );
-};
+}
 
 export default App;
