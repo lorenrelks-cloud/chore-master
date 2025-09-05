@@ -1,124 +1,86 @@
-import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import React, { useState, useEffect } from "react"
+import { supabase } from "./supabaseClient"
 
-// Supabase client
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL!,
-  import.meta.env.VITE_SUPABASE_ANON_KEY!
-);
-
-interface Person {
-  id: number;
-  name: string;
+type Person = {
+  id: number
+  name: string
 }
 
-interface Chore {
-  id: number;
-  name: string;
-  area: string;
-  weight: number;
-  freq: "weekly" | "monthly" | "quarterly";
+type Chore = {
+  id: number
+  name: string
+  area: string
+  weight: number
+  freq: string
 }
 
-interface Settings {
-  id: number;
-  minchores: number;
-  maxchores: number;
+type Setting = {
+  id: number
+  minchores: number
+  maxchores: number
 }
-
-type Tab = "dashboard" | "edit" | "settings";
 
 function App() {
-  const [tab, setTab] = useState<Tab>("dashboard");
-  const [people, setPeople] = useState<Person[]>([]);
-  const [chores, setChores] = useState<Chore[]>([]);
-  const [settings, setSettings] = useState<Settings | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("dashboard")
+  const [people, setPeople] = useState<Person[]>([])
+  const [chores, setChores] = useState<Chore[]>([])
+  const [settings, setSettings] = useState<Setting | null>(null)
 
-  // Load initial data
+  // Fetch people, chores, and settings from Supabase
   useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
+    const fetchData = async () => {
+      const { data: peopleData, error: peopleError } = await supabase
+        .from("people")
+        .select("*")
+      if (peopleError) console.error("People error:", peopleError)
+      else setPeople(peopleData || [])
 
-      const { data: peopleData } = await supabase.from("people").select("*");
-      if (peopleData) setPeople(peopleData);
+      const { data: choresData, error: choresError } = await supabase
+        .from("chores")
+        .select("*")
+      if (choresError) console.error("Chores error:", choresError)
+      else setChores(choresData || [])
 
-      const { data: choresData } = await supabase.from("chores").select("*");
-      if (choresData) setChores(choresData);
+      const { data: settingsData, error: settingsError } = await supabase
+        .from("settings")
+        .select("*")
+        .single()
+      if (settingsError) console.error("Settings error:", settingsError)
+      else setSettings(settingsData)
+    }
 
-      const { data: settingsData } = await supabase.from("settings").select("*").single();
-      if (settingsData) setSettings(settingsData);
+    fetchData()
+  }, [])
 
-      setLoading(false);
-    };
-
-    loadData();
-
-    // Realtime updates
-    const channel = supabase
-      .channel("chore-updates")
-      .on("postgres_changes", { event: "*", schema: "public" }, () => {
-        loadData();
+  const saveSettings = async () => {
+    if (!settings) return
+    const { error } = await supabase
+      .from("settings")
+      .update({
+        minchores: settings.minchores,
+        maxchores: settings.maxchores,
       })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
-
-  // Save people
-  const savePeople = async (newPeople: Person[]) => {
-    setPeople(newPeople);
-    await supabase.from("people").delete().neq("id", 0);
-    await supabase.from("people").insert(newPeople);
-  };
-
-  // Save chores
-  const saveChores = async (newChores: Chore[]) => {
-    setChores(newChores);
-    await supabase.from("chores").delete().neq("id", 0);
-    await supabase.from("chores").insert(newChores);
-  };
-
-  // Save settings
-  const saveSettings = async (newSettings: Settings) => {
-    setSettings(newSettings);
-    await supabase.from("settings").upsert(newSettings);
-  };
-
-  if (loading) return <p>Loading...</p>;
+      .eq("id", settings.id)
+    if (error) console.error("Save settings error:", error)
+    else alert("✅ Settings saved to Supabase!")
+  }
 
   return (
-    <div style={{ padding: "20px", fontFamily: "sans-serif" }}>
+    <div style={{ fontFamily: "sans-serif", padding: "20px" }}>
+      {/* Navigation Tabs */}
       <nav style={{ marginBottom: "20px" }}>
-        <a
-          href="#"
-          onClick={() => setTab("dashboard")}
-          style={{ marginRight: "20px" }}
-        >
-          Dashboard
-        </a>
-        <a
-          href="#"
-          onClick={() => setTab("edit")}
-          style={{ marginRight: "20px" }}
-        >
-          Edit Chores
-        </a>
-        <a href="#" onClick={() => setTab("settings")}>
-          Settings
-        </a>
+        <button onClick={() => setTab("dashboard")}>Dashboard</button>
+        <button onClick={() => setTab("chores")}>Edit Chores</button>
+        <button onClick={() => setTab("settings")}>Settings</button>
       </nav>
 
-      <h1>Housemate Chore Balancer</h1>
-
-      <p style={{ color: "green", fontWeight: "bold" }}>
-        ✅ Changes here are saved to Supabase and shared with all housemates.
-      </p>
-
+      {/* Dashboard */}
       {tab === "dashboard" && (
         <div>
+          <h1>Housemate Chore Balancer</h1>
+          <p style={{ color: "green" }}>
+            ✅ Changes here are saved to Supabase and shared with all housemates.
+          </p>
           <h2>People</h2>
           <ul>
             {people.map((p) => (
@@ -130,67 +92,59 @@ function App() {
           <ul>
             {chores.map((c) => (
               <li key={c.id}>
-                {c.name} ({c.freq}, weight {c.weight})
+                {c.name} — {c.area} — {c.freq}
               </li>
             ))}
           </ul>
         </div>
       )}
 
-      {tab === "edit" && (
+      {/* Edit Chores */}
+      {tab === "chores" && (
         <div>
           <h2>Edit Chores</h2>
-          <p>You can add or remove chores below. Changes sync to everyone.</p>
-          <button
-            onClick={() =>
-              saveChores([
-                ...chores,
-                {
-                  id: Date.now(),
-                  name: "New Chore",
-                  area: "Kitchen",
-                  weight: 1,
-                  freq: "weekly",
-                },
-              ])
-            }
-          >
-            Add Chore
-          </button>
+          <p>Chore editing UI coming soon (still saves to Supabase).</p>
           <ul>
             {chores.map((c) => (
-              <li key={c.id}>{c.name}</li>
+              <li key={c.id}>
+                {c.name} — {c.area} — {c.freq}
+              </li>
             ))}
           </ul>
         </div>
       )}
 
-      {tab === "settings" && (
+      {/* Settings */}
+      {tab === "settings" && settings && (
         <div>
           <h2>Settings</h2>
-          {settings ? (
-            <div>
-              <p>
-                Min chores: {settings.minchores}, Max chores: {settings.maxchores}
-              </p>
-              <button
-                onClick={() =>
-                  saveSettings({
-                    ...settings,
-                    minchores: settings.minchores + 1,
-                  })
-                }
-              >
-                +1 Min
-              </button>
-            </div>
-          ) : (
-            <p>No settings found</p>
-          )}
+          <label>
+            Min chores per person:
+            <input
+              type="number"
+              value={settings.minchores}
+              onChange={(e) =>
+                setSettings({ ...settings, minchores: parseInt(e.target.value) })
+              }
+            />
+          </label>
+          <br />
+          <label>
+            Max chores per person:
+            <input
+              type="number"
+              value={settings.maxchores}
+              onChange={(e) =>
+                setSettings({ ...settings, maxchores: parseInt(e.target.value) })
+              }
+            />
+          </label>
+          <br />
+          <button onClick={saveSettings}>Save Settings</button>
         </div>
       )}
     </div>
-  );
+  )
 }
 
-export default App;
+export default App
