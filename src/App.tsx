@@ -83,19 +83,33 @@ export default function App() {
 
     function occurrencesInWeek(chore: Chore, widx: number) {
       switch (chore.freq) {
-        case "weekly": return 1;
-        case "every_2_weeks": return widx % 2 === 0 ? 1 : 0;
-        case "monthly": return (widx % 4 === (chore.id - 1) % 4) ? 1 : 0;
-        case "quarterly": {
-          // Hard-map quarterly chores so they don’t stack in week 1
-          const map: Record<number, number> = {
-            18: 0, // Change Filter → Week 1
-            19: 2, // Clean baseboards → Week 3
-            20: 3, // Wash curtains → Week 4
-          };
-          return (widx % 4 === map[chore.id]) ? 1 : 0;
+        case "weekly":
+          return 1;
+
+        case "every_2_weeks":
+          return widx % 2 === 0 ? 1 : 0;
+
+        case "monthly": {
+          // Evenly spread monthly chores across the 4-week cycle
+          const monthlyChores = chores.filter(c => c.freq === "monthly");
+          const index = monthlyChores.findIndex(c => c.id === chore.id);
+          if (index === -1) return 0;
+          const assignedWeek = index % 4; // 0→Week1, 1→Week2, 2→Week3, 3→Week4
+          return (widx % 4 === assignedWeek) ? 1 : 0;
         }
-        default: return 0;
+
+        case "quarterly": {
+          // Explicitly stagger quarterly chores across 4 weeks
+          const quarterlyChores = chores.filter(c => c.freq === "quarterly");
+          const index = quarterlyChores.findIndex(c => c.id === chore.id);
+          if (index === -1) return 0;
+          const map = [0, 2, 3]; // assign to Weeks 1, 3, 4
+          const assignedWeek = map[index % map.length];
+          return (widx % 4 === assignedWeek) ? 1 : 0;
+        }
+
+        default:
+          return 0;
       }
     }
 
@@ -126,6 +140,7 @@ export default function App() {
         week.counts[chosen]++; week.loads[chosen] += chore.weight;
       }
 
+      // enforce min/max
       for (const p of P) {
         while (week.counts[p] < minChores) {
           const donor = P.find(x => week.counts[x] > minChores);
