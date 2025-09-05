@@ -10,7 +10,6 @@ import React, { useEffect, useMemo, useState } from "react";
  * - Mail compose with CRLF fix (\r\n)
  */
 
-/* ----------------------------- Types & Utils ------------------------------ */
 type FreqKey = "weekly" | "twice_week" | "every_2_weeks" | "monthly" | "quarterly";
 type Chore = {
   id: number;
@@ -20,13 +19,12 @@ type Chore = {
   freq: FreqKey;
   notes?: string;
 };
-
 type Person = { name: string; email?: string };
 type WeekAssignment = {
   week: number;
   assignments: { person: string; choreId: number; choreName: string; area?: string; weight: number }[];
-  loads: Record<string, number>; // sum of weights
-  counts: Record<string, number>; // number of chores
+  loads: Record<string, number>;
+  counts: Record<string, number>;
 };
 
 const APP_STORAGE_KEY = "chore-master:v2";
@@ -34,18 +32,9 @@ const DEFAULT_MIN = 8;
 const DEFAULT_MAX = 10;
 
 const CRLF = "\r\n";
-function crlfJoin(lines: string[]) {
-  return lines.join(CRLF);
-}
-
-function uid(seed = 0) {
-  // light randomness to break ties
-  return Math.sin(Date.now() + seed * 9.73);
-}
-
-function clamp(n: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, n));
-}
+function crlfJoin(lines: string[]) { return lines.join(CRLF); }
+function uid(seed = 0) { return Math.sin(Date.now() + seed * 9.73); }
+function clamp(n: number, a: number, b: number) { return Math.max(a, Math.min(b, n)); }
 
 /* ------------------------------- Defaults --------------------------------- */
 const DEFAULT_PEOPLE: Person[] = [
@@ -84,7 +73,6 @@ const DEFAULT_CHORES: Chore[] = [
 
 /* --------------------------------- App ------------------------------------ */
 export default function App() {
-  /* ---------- Persistence ---------- */
   const [loaded, setLoaded] = useState(false);
   const [people, setPeople] = useState<Person[]>(DEFAULT_PEOPLE);
   const [chores, setChores] = useState<Chore[]>(DEFAULT_CHORES);
@@ -121,9 +109,7 @@ export default function App() {
   // save
   useEffect(() => {
     if (!loaded) return;
-    const payload = {
-      people, chores, minChores, maxChores, avoidRepeats, noDupPerWeek, cycleWeeks, cycleStart,
-    };
+    const payload = { people, chores, minChores, maxChores, avoidRepeats, noDupPerWeek, cycleWeeks, cycleStart };
     localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(payload));
   }, [loaded, people, chores, minChores, maxChores, avoidRepeats, noDupPerWeek, cycleWeeks, cycleStart]);
 
@@ -144,7 +130,7 @@ export default function App() {
         return (widx % 4 === off) ? 1 : 0;
       }
       case "quarterly": {
-        // Only the first 4-week block of each quarter (block % 3 === 0), on week 0 of that block
+        // First 4-week block of each quarter (block % 3 === 0), on the first week of that block
         const block = Math.floor(widx / 4);
         const isQuarterBlock = (block % 3 === 0);
         const isGroupWeek = (widx % 4 === 0);
@@ -159,9 +145,7 @@ export default function App() {
     if (!people.length || !chores.length) return [];
     const P = people.map(p => p.name);
     const result: WeekAssignment[] = [];
-
-    // Keep memory of last assignee by chore to reduce immediate repeats
-    const lastAssignee: Record<number, string | undefined> = {};
+    const lastAssignee: Record<number, string | undefined> = {}; // reduce immediate repeats
 
     for (let w = 0; w < cycleWeeks; w++) {
       const week: WeekAssignment = {
@@ -171,7 +155,7 @@ export default function App() {
         counts: Object.fromEntries(P.map(p => [p, 0])),
       };
 
-      // Build occurrences list
+      // Build occurrences
       type Job = { choreId: number; choreName: string; area?: string; weight: number; isQuarterly: boolean };
       const jobs: Job[] = [];
       const quarterly: Job[] = [];
@@ -185,37 +169,32 @@ export default function App() {
         }
       }
 
-      // 1) Assign quarterly: same chore to everyone (group week)
+      // 1) Assign quarterly (group week: everyone gets it)
       for (const q of quarterly) {
         for (const person of P) {
           if (noDupPerWeek && week.assignments.some(a => a.person === person && a.choreId === q.choreId)) continue;
           week.assignments.push({ person, choreId: q.choreId, choreName: q.choreName, area: q.area, weight: q.weight });
           week.loads[person] += q.weight;
           week.counts[person] += 1;
-          lastAssignee[q.choreId] = person; // not too meaningful here, but update anyway
+          lastAssignee[q.choreId] = person;
         }
       }
 
-      // 2) Assign remaining jobs greedily but with randomness, respecting maxChores
+      // 2) Greedy + randomized assignment for remaining jobs (respecting max)
       jobs.sort((a, b) => {
         const wdiff = b.weight - a.weight;
         return wdiff !== 0 ? wdiff : (uid(a.choreId) - uid(b.choreId));
       });
 
       for (const job of jobs) {
-        // candidates that haven't hit max and (optionally) didn't do this last time
         let candidates = P.filter(p => week.counts[p] < maxChores);
         if (avoidRepeats && lastAssignee[job.choreId]) {
           candidates = candidates.filter(p => p !== lastAssignee[job.choreId]);
-          if (candidates.length === 0) candidates = P.filter(p => week.counts[p] < maxChores);
+          if (!candidates.length) candidates = P.filter(p => week.counts[p] < maxChores);
         }
-
-        // Avoid duplicate of same chore for same person in same week
         candidates = candidates.filter(p => !(noDupPerWeek && week.assignments.some(a => a.person === p && a.choreId === job.choreId)));
+        if (!candidates.length) continue;
 
-        if (candidates.length === 0) continue;
-
-        // pick candidate with fewest counts, then lowest load, then random tiebreak
         candidates.sort((p1, p2) => {
           const c = week.counts[p1] - week.counts[p2];
           if (c !== 0) return c;
@@ -231,24 +210,21 @@ export default function App() {
         lastAssignee[job.choreId] = chosen;
       }
 
-      // 3) Min chore enforcement pass (revised):
+      // Helpers for adjustment
       const canMove = (a: { person: string; choreId: number }) => {
-        // Don't move quarterly chores (group), keep them fixed
         const ch = chores.find(c => c.id === a.choreId);
         return ch && ch.freq !== "quarterly";
       };
 
+      // 3) Raise anyone below min by moving lightest transferable task (prefer donors over max)
       let changed = true;
       let guard = 0;
-
-      // Fill anyone below minChores by moving the lightest transferable chore
       while (changed && guard++ < 200) {
         changed = false;
 
         const below = P.filter(p => week.counts[p] < minChores);
         if (!below.length) break;
 
-        // Donors: prefer folks above maxChores, then those with the highest counts
         const donors = P
           .filter(p => week.counts[p] > minChores)
           .sort((a, b) => {
@@ -263,52 +239,6 @@ export default function App() {
         for (const needy of below) {
           for (const donor of donors) {
             if (donor === needy) continue;
-
-            const movable = week.assignments
-              .filter(a =>
-                a.person === donor &&
-                canMove(a) &&
-                (!noDupPerWeek || !week.assignments.some(x => x.person === needy && x.choreId === a.choreId))
-              )
-              .sort((a, b) => a.weight - b.weight); // move the lightest task first
-
-            if (!movable.length) continue;
-
-            const take = movable[0];
-            // reassign
-            take.person = needy;
-            week.counts[donor] -= 1;
-            week.loads[donor] -= take.weight;
-            week.counts[needy] += 1;
-            week.loads[needy] += take.weight;
-
-            changed = true;
-            break; // recompute below/donors on next loop
-          }
-          if (changed) break;
-        }
-      }
-
-      // 4) Max chore enforcement pass (new):
-      // If anyone is still above maxChores, push their lightest transferable chore
-      // to the person with the fewest chores who can accept it.
-      changed = true;
-      guard = 0;
-
-      while (changed && guard++ < 200) {
-        changed = false;
-
-        const over = P.filter(p => week.counts[p] > maxChores)
-          .sort((a, b) => week.counts[b] - week.counts[a]); // most over-full first
-        const under = P.filter(p => week.counts[p] < maxChores)
-          .sort((a, b) => week.counts[a] - week.counts[b]); // fewest chores first
-
-        if (!over.length || !under.length) break;
-
-        for (const donor of over) {
-          for (const needy of under) {
-            if (donor === needy) continue;
-
             const movable = week.assignments
               .filter(a =>
                 a.person === donor &&
@@ -316,11 +246,9 @@ export default function App() {
                 (!noDupPerWeek || !week.assignments.some(x => x.person === needy && x.choreId === a.choreId))
               )
               .sort((a, b) => a.weight - b.weight);
-
             if (!movable.length) continue;
 
             const take = movable[0];
-            // reassign
             take.person = needy;
             week.counts[donor] -= 1;
             week.loads[donor] -= take.weight;
@@ -331,6 +259,76 @@ export default function App() {
             break;
           }
           if (changed) break;
+        }
+      }
+
+      // 4) Push down anyone above max by moving lightest transferable task
+      changed = true;
+      guard = 0;
+      while (changed && guard++ < 200) {
+        changed = false;
+
+        const over = P.filter(p => week.counts[p] > maxChores)
+          .sort((a, b) => week.counts[b] - week.counts[a]);
+        const under = P.filter(p => week.counts[p] < maxChores)
+          .sort((a, b) => week.counts[a] - week.counts[b]);
+
+        if (!over.length || !under.length) break;
+
+        for (const donor of over) {
+          for (const needy of under) {
+            if (donor === needy) continue;
+            const movable = week.assignments
+              .filter(a =>
+                a.person === donor &&
+                canMove(a) &&
+                (!noDupPerWeek || !week.assignments.some(x => x.person === needy && x.choreId === a.choreId))
+              )
+              .sort((a, b) => a.weight - b.weight);
+            if (!movable.length) continue;
+
+            const take = movable[0];
+            take.person = needy;
+            week.counts[donor] -= 1;
+            week.loads[donor] -= take.weight;
+            week.counts[needy] += 1;
+            week.loads[needy] += take.weight;
+
+            changed = true;
+            break;
+          }
+          if (changed) break;
+        }
+      }
+
+      // 5) HARD CAP: if the week simply has too many jobs, drop the lightest non-quarterly jobs
+      // until everyone is <= maxChores. (Quarterly chores are fixed and won't be removed.)
+      let dropped = true;
+      guard = 0;
+      while (dropped && guard++ < 500) {
+        dropped = false;
+        const offenders = P
+          .filter(p => week.counts[p] > maxChores)
+          .sort((a, b) =>
+            (week.counts[b] - week.counts[a]) || (week.loads[b] - week.loads[a])
+          );
+        if (!offenders.length) break;
+
+        for (const offender of offenders) {
+          const removable = week.assignments
+            .filter(a => a.person === offender && canMove(a))
+            .sort((a, b) => a.weight - b.weight); // drop the lightest first
+          if (!removable.length) continue;
+
+          const drop = removable[0];
+          const idx = week.assignments.indexOf(drop);
+          if (idx >= 0) {
+            week.assignments.splice(idx, 1);
+            week.counts[offender] -= 1;
+            week.loads[offender] -= drop.weight;
+            dropped = true;
+            break; // recompute offenders
+          }
         }
       }
 
@@ -648,7 +646,6 @@ export default function App() {
 
   return (
     <div className="max-w-6xl mx-auto">
-      {/* Tabs */}
       <div className="px-4 pt-4 flex items-center gap-4">
         <button onClick={() => setTab("dashboard")}
                 className={`pb-2 ${tab === "dashboard" ? "border-b-2 border-blue-600 text-blue-700" : "text-slate-600"}`}>
