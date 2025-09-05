@@ -1,20 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-/**
- * Housemate Chore Balancer
- * - Balanced + randomized weekly assignments
- * - Enforces min/max chores (defaults 8–10, editable in Settings)
- * - Quarterly chores = group week
- * - LocalStorage persistence
- * - Tabs: Dashboard / Edit Chores / Settings
- */
-
 type FreqKey = "weekly" | "twice_week" | "every_2_weeks" | "monthly" | "quarterly";
 type Chore = { id: number; name: string; area?: string; weight: number; freq: FreqKey; notes?: string };
 type Person = { name: string; email?: string };
 type WeekAssignment = {
   week: number;
-  assignments: { person: string; choreId: number; choreName: string; area?: string; weight: number }[];
+  assignments: { person: string; choreId: number; choreName: string; area?: string; weight: number; freq: FreqKey }[];
   loads: Record<string, number>;
   counts: Record<string, number>;
 };
@@ -95,7 +86,11 @@ export default function App() {
         case "weekly": return 1;
         case "every_2_weeks": return widx % 2 === 0 ? 1 : 0;
         case "monthly": return (widx % 4 === (chore.id - 1) % 4) ? 1 : 0;
-        case "quarterly": return widx % 12 === 0 ? 1 : 0;
+        case "quarterly": {
+          const order = [0, 2, 3]; // spread quarterly chores across cycle
+          const pos = chore.id % order.length;
+          return (widx % 4 === order[pos]) ? 1 : 0;
+        }
         default: return 0;
       }
     }
@@ -116,11 +111,17 @@ export default function App() {
 
       for (const chore of jobs) {
         const chosen = P.sort((a, b) => week.counts[a] - week.counts[b])[0];
-        week.assignments.push({ person: chosen, choreId: chore.id, choreName: chore.name, area: chore.area, weight: chore.weight });
+        week.assignments.push({
+          person: chosen,
+          choreId: chore.id,
+          choreName: chore.name,
+          area: chore.area,
+          weight: chore.weight,
+          freq: chore.freq,
+        });
         week.counts[chosen]++; week.loads[chosen] += chore.weight;
       }
 
-      // enforce min/max
       for (const p of P) {
         while (week.counts[p] < minChores) {
           const donor = P.find(x => week.counts[x] > minChores);
@@ -166,7 +167,11 @@ export default function App() {
                     </div>
                     <ul className="text-sm list-disc pl-4">
                       {items.map((it, i) => (
-                        <li key={i}>{it.choreName}{it.area ? ` [${it.area}]` : ""} (w{it.weight})</li>
+                        <li key={i}>
+                          {it.choreName}
+                          {` (${it.freq.charAt(0).toUpperCase() + it.freq.slice(1).replace(/_/g, " ")})`}
+                          {it.area ? ` [${it.area}]` : ""} (w{it.weight})
+                        </li>
                       ))}
                     </ul>
                   </div>
@@ -191,7 +196,7 @@ export default function App() {
           </div>
         ))}
         <input value={newChore.name} onChange={e => setNewChore({ ...newChore, name: e.target.value })} placeholder="New chore" />
-        <button onClick={() => setChores([...chores, newChore])}>Add</button>
+        <button onClick={() => setChores([...chores, { ...newChore, id: chores.length + 1 }])}>Add</button>
       </div>
     );
   }
