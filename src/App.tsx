@@ -231,7 +231,7 @@ export default function App() {
         lastAssignee[job.choreId] = chosen;
       }
 
-      // 3) Min chore enforcement pass: if someone < min and someone else > min, try to reassign a movable low-weight task
+      // 3) Min chore enforcement pass (revised):
       const canMove = (a: { person: string; choreId: number }) => {
         // Don't move quarterly chores (group), keep them fixed
         const ch = chores.find(c => c.id === a.choreId);
@@ -240,18 +240,40 @@ export default function App() {
 
       let changed = true;
       let guard = 0;
-      while (changed && guard++ < 100) {
+
+      // Fill anyone below minChores by moving the lightest transferable chore
+      while (changed && guard++ < 200) {
         changed = false;
+
         const below = P.filter(p => week.counts[p] < minChores);
-        const above = P.filter(p => week.counts[p] > minChores).sort((a, b) => week.counts[b] - week.counts[a]);
-        if (!below.length || !above.length) break;
+        if (!below.length) break;
+
+        // Donors: prefer folks above maxChores, then those with the highest counts
+        const donors = P
+          .filter(p => week.counts[p] > minChores)
+          .sort((a, b) => {
+            const aOver = week.counts[a] > maxChores ? 1 : 0;
+            const bOver = week.counts[b] > maxChores ? 1 : 0;
+            if (bOver !== aOver) return bOver - aOver; // over-max first
+            return week.counts[b] - week.counts[a];     // then most chores
+          });
+
+        if (!donors.length) break;
 
         for (const needy of below) {
-          for (const donor of above) {
+          for (const donor of donors) {
+            if (donor === needy) continue;
+
             const movable = week.assignments
-              .filter(a => a.person === donor && canMove(a) && (!noDupPerWeek || !week.assignments.some(x => x.person === needy && x.choreId === a.choreId)))
-              .sort((a, b) => a.weight - b.weight); // move the lightest first
+              .filter(a =>
+                a.person === donor &&
+                canMove(a) &&
+                (!noDupPerWeek || !week.assignments.some(x => x.person === needy && x.choreId === a.choreId))
+              )
+              .sort((a, b) => a.weight - b.weight); // move the lightest task first
+
             if (!movable.length) continue;
+
             const take = movable[0];
             // reassign
             take.person = needy;
@@ -259,8 +281,53 @@ export default function App() {
             week.loads[donor] -= take.weight;
             week.counts[needy] += 1;
             week.loads[needy] += take.weight;
+
             changed = true;
-            // break to recompute below/above next loop
+            break; // recompute below/donors on next loop
+          }
+          if (changed) break;
+        }
+      }
+
+      // 4) Max chore enforcement pass (new):
+      // If anyone is still above maxChores, push their lightest transferable chore
+      // to the person with the fewest chores who can accept it.
+      changed = true;
+      guard = 0;
+
+      while (changed && guard++ < 200) {
+        changed = false;
+
+        const over = P.filter(p => week.counts[p] > maxChores)
+          .sort((a, b) => week.counts[b] - week.counts[a]); // most over-full first
+        const under = P.filter(p => week.counts[p] < maxChores)
+          .sort((a, b) => week.counts[a] - week.counts[b]); // fewest chores first
+
+        if (!over.length || !under.length) break;
+
+        for (const donor of over) {
+          for (const needy of under) {
+            if (donor === needy) continue;
+
+            const movable = week.assignments
+              .filter(a =>
+                a.person === donor &&
+                canMove(a) &&
+                (!noDupPerWeek || !week.assignments.some(x => x.person === needy && x.choreId === a.choreId))
+              )
+              .sort((a, b) => a.weight - b.weight);
+
+            if (!movable.length) continue;
+
+            const take = movable[0];
+            // reassign
+            take.person = needy;
+            week.counts[donor] -= 1;
+            week.loads[donor] -= take.weight;
+            week.counts[needy] += 1;
+            week.loads[needy] += take.weight;
+
+            changed = true;
             break;
           }
           if (changed) break;
