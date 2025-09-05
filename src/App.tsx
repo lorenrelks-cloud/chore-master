@@ -1,113 +1,146 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 
-type FreqKey = "weekly" | "twice_week" | "every_2_weeks" | "monthly" | "quarterly";
-type Chore = { id: number; name: string; area?: string; weight: number; freq: FreqKey; notes?: string };
-type Person = { name: string; email?: string };
+/**
+ * Supabase client (env vars come from Vercel)
+ * VITE_SUPABASE_URL:      https://<project-ref>.supabase.co
+ * VITE_SUPABASE_ANON_KEY: your Publishable (anon) key
+ */
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL!,
+  import.meta.env.VITE_SUPABASE_ANON_KEY!
+);
+
+// ---------- Types ----------
+type FreqKey = "weekly" | "every_2_weeks" | "monthly" | "quarterly";
+
+type Chore = {
+  id: number;
+  name: string;
+  area?: string | null;
+  weight: number;
+  freq: FreqKey;
+};
+
+type Person = {
+  id: number;
+  name: string;
+};
+
+type SettingsRow = {
+  id: number;
+  minChores: number;
+  maxChores: number;
+};
+
 type WeekAssignment = {
   week: number;
-  assignments: { person: string; choreId: number; choreName: string; area?: string; weight: number; freq: FreqKey }[];
+  assignments: {
+    person: string;
+    choreId: number;
+    choreName: string;
+    area?: string | null;
+    weight: number;
+    freq: FreqKey;
+  }[];
   loads: Record<string, number>;
   counts: Record<string, number>;
 };
 
-const APP_STORAGE_KEY = "chore-master:v2";
-const DEFAULT_MIN = 8;
-const DEFAULT_MAX = 10;
-
-const DEFAULT_PEOPLE: Person[] = [
-  { name: "Loren" },
-  { name: "Zach" },
-  { name: "Tristyn" },
-];
-
-const DEFAULT_CHORES: Chore[] = [
-  { id: 1, name: "Dusting", area: "Living Room", weight: 3, freq: "weekly" },
-  { id: 2, name: "Coffee table", area: "Living Room", weight: 1, freq: "weekly" },
-  { id: 3, name: "Side tables", area: "Living Room", weight: 1, freq: "weekly" },
-  { id: 4, name: "Wipe counters", area: "Kitchen", weight: 2, freq: "weekly" },
-  { id: 5, name: "Clean sink", area: "Kitchen", weight: 2, freq: "weekly" },
-  { id: 6, name: "Organizing fridge", area: "Kitchen", weight: 2, freq: "weekly" },
-  { id: 7, name: "Wipe washer & dryer", area: "Laundry Room", weight: 2, freq: "weekly" },
-  { id: 8, name: "Clean cat food bowls", area: "Laundry Room", weight: 1, freq: "weekly" },
-  { id: 9, name: "Sweep stairs", area: "Stairs", weight: 3, freq: "weekly" },
-  { id: 10, name: "Clean windows", area: "All Rooms", weight: 5, freq: "monthly" },
-  { id: 11, name: "Wipe doors", area: "All Rooms", weight: 3, freq: "monthly" },
-  { id: 12, name: "Wipe down trash can", area: "Laundry", weight: 2, freq: "monthly" },
-  { id: 13, name: "Deep clean fridge", area: "Kitchen", weight: 4, freq: "monthly" },
-  { id: 14, name: "Organizing cabinets", area: "Kitchen", weight: 3, freq: "monthly" },
-  { id: 15, name: "Downstairs bathroom", area: "Bathroom", weight: 4, freq: "monthly" },
-  { id: 16, name: "Clean dishwasher gasket", area: "Kitchen", weight: 2, freq: "monthly" },
-  { id: 17, name: "Clean dishwasher drain", area: "Kitchen", weight: 3, freq: "monthly" },
-  { id: 18, name: "Change Filter", area: "Upstairs", weight: 3, freq: "quarterly" },
-  { id: 19, name: "Clean baseboards", area: "All Rooms", weight: 4, freq: "quarterly" },
-  { id: 20, name: "Wash curtains", area: "Living Room", weight: 4, freq: "quarterly" },
-];
-
-function clamp(n: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, n));
-}
-
+// ---------- App ----------
 export default function App() {
-  const [loaded, setLoaded] = useState(false);
-  const [people, setPeople] = useState<Person[]>(DEFAULT_PEOPLE);
-  const [chores, setChores] = useState<Chore[]>(DEFAULT_CHORES);
-  const [minChores, setMinChores] = useState(DEFAULT_MIN);
-  const [maxChores, setMaxChores] = useState(DEFAULT_MAX);
-  const [cycleWeeks, setCycleWeeks] = useState(4);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [chores, setChores] = useState<Chore[]>([]);
+  const [settings, setSettings] = useState<SettingsRow | null>(null);
+  const [cycleWeeks] = useState(4);
   const [tab, setTab] = useState<"dashboard" | "edit" | "settings">("dashboard");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
+  // --------- Initial load ----------
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(APP_STORAGE_KEY);
-      if (raw) {
-        const saved = JSON.parse(raw);
-        if (saved.people) setPeople(saved.people);
-        if (saved.chores) setChores(saved.chores);
-        if (saved.minChores) setMinChores(saved.minChores);
-        if (saved.maxChores) setMaxChores(saved.maxChores);
+    (async () => {
+      try {
+        setLoading(true);
+        const [{ data: p }, { data: c }, { data: s }] = await Promise.all([
+          supabase.from("people").select("*").order("id", { ascending: true }),
+          supabase.from("chores").select("*").order("id", { ascending: true }),
+          supabase.from("settings").select("*").order("id", { ascending: true }).limit(1),
+        ]);
+        setPeople(p || []);
+        setChores((c || []) as Chore[]);
+        setSettings((s && s[0]) || { id: 1, minChores: 8, maxChores: 10 });
+        setError(null);
+      } catch (e: any) {
+        setError(e?.message || "Failed to load data");
+      } finally {
+        setLoading(false);
       }
-    } catch {}
-    setLoaded(true);
+    })();
+
+    // --------- Realtime subscriptions ----------
+    const ch = supabase
+      .channel("chore-master-sync")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "people" },
+        async () => {
+          const { data } = await supabase.from("people").select("*").order("id");
+          setPeople(data || []);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "chores" },
+        async () => {
+          const { data } = await supabase.from("chores").select("*").order("id");
+          setChores((data || []) as Chore[]);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "settings" },
+        async () => {
+          const { data } = await supabase.from("settings").select("*").order("id").limit(1);
+          if (data && data[0]) setSettings(data[0]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(ch);
+    };
   }, []);
 
-  useEffect(() => {
-    if (!loaded) return;
-    const payload = { people, chores, minChores, maxChores, cycleWeeks };
-    localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(payload));
-  }, [loaded, people, chores, minChores, maxChores, cycleWeeks]);
-
+  // --------- Assignment logic ----------
   const weeks: WeekAssignment[] = useMemo(() => {
-    if (!people.length || !chores.length) return [];
-    const P = people.map(p => p.name);
+    if (!people.length || !chores.length || !settings) return [];
+    const P = people.map((p) => p.name);
     const result: WeekAssignment[] = [];
 
-    function occurrencesInWeek(chore: Chore, widx: number) {
+    function occurrencesInWeek(chore: Chore, widx: number): number {
       switch (chore.freq) {
         case "weekly":
           return 1;
-
         case "every_2_weeks":
           return widx % 2 === 0 ? 1 : 0;
-
         case "monthly": {
-          // Evenly spread monthly chores across the 4-week cycle
-          const monthlyChores = chores.filter(c => c.freq === "monthly");
-          const index = monthlyChores.findIndex(c => c.id === chore.id);
-          if (index === -1) return 0;
-          const assignedWeek = index % 4;
-          return (widx % 4 === assignedWeek) ? 1 : 0;
+          // Evenly distribute monthly chores across Weeks 1..4
+          const monthly = chores.filter((c) => c.freq === "monthly");
+          const idx = monthly.findIndex((c) => c.id === chore.id);
+          if (idx === -1) return 0;
+          const assignedWeek = idx % 4; // 0→W1, 1→W2, 2→W3, 3→W4
+          return widx % 4 === assignedWeek ? 1 : 0;
         }
-
         case "quarterly": {
-          // Explicitly stagger quarterly chores across 4 weeks
-          const quarterlyChores = chores.filter(c => c.freq === "quarterly");
-          const index = quarterlyChores.findIndex(c => c.id === chore.id);
-          if (index === -1) return 0;
-          const map = [0, 2, 3]; // assign to Weeks 1, 3, 4
-          const assignedWeek = map[index % map.length];
-          return (widx % 4 === assignedWeek) ? 1 : 0;
+          // Stagger quarterly chores explicitly across Weeks 1,3,4
+          const quarterly = chores.filter((c) => c.freq === "quarterly");
+          const idx = quarterly.findIndex((c) => c.id === chore.id);
+          if (idx === -1) return 0;
+          const map = [0, 2, 3]; // 0→W1, 2→W3, 3→W4
+          const assignedWeek = map[idx % map.length];
+          return widx % 4 === assignedWeek ? 1 : 0;
         }
-
         default:
           return 0;
       }
@@ -117,18 +150,20 @@ export default function App() {
       const week: WeekAssignment = {
         week: w + 1,
         assignments: [],
-        loads: Object.fromEntries(P.map(p => [p, 0])),
-        counts: Object.fromEntries(P.map(p => [p, 0])),
+        loads: Object.fromEntries(P.map((p) => [p, 0])),
+        counts: Object.fromEntries(P.map((p) => [p, 0])),
       };
 
+      // Build job list for the week
       const jobs: Chore[] = [];
       for (const c of chores) {
         const times = occurrencesInWeek(c, w);
         for (let i = 0; i < times; i++) jobs.push(c);
       }
 
+      // Greedy fair distribution by count
       for (const chore of jobs) {
-        const chosen = P.sort((a, b) => week.counts[a] - week.counts[b])[0];
+        const chosen = [...P].sort((a, b) => week.counts[a] - week.counts[b])[0];
         week.assignments.push({
           person: chosen,
           choreId: chore.id,
@@ -137,59 +172,55 @@ export default function App() {
           weight: chore.weight,
           freq: chore.freq,
         });
-        week.counts[chosen]++; week.loads[chosen] += chore.weight;
+        week.counts[chosen] += 1;
+        week.loads[chosen] += chore.weight;
       }
 
-      // enforce min/max
+      // Soft cap: trim if any exceed maxChores
       for (const p of P) {
-        while (week.counts[p] < minChores) {
-          const donor = P.find(x => week.counts[x] > minChores);
-          if (!donor) break;
-          const moved = week.assignments.find(a => a.person === donor);
-          if (!moved) break;
-          moved.person = p;
-          week.counts[donor]--; week.counts[p]++;
-        }
-        while (week.counts[p] > maxChores) {
-          const moved = week.assignments.find(a => a.person === p);
-          if (!moved) break;
-          week.assignments = week.assignments.filter(a => a !== moved);
-          week.counts[p]--;
+        while (week.counts[p] > settings.maxChores) {
+          const idx = week.assignments.findIndex((a) => a.person === p);
+          if (idx === -1) break;
+          const [removed] = week.assignments.splice(idx, 1);
+          week.counts[p] -= 1;
+          week.loads[p] -= removed.weight;
         }
       }
 
       result.push(week);
     }
+
     return result;
-  }, [people, chores, minChores, maxChores, cycleWeeks]);
+  }, [people, chores, settings, cycleWeeks]);
 
-  function groupedListFor(person: string, widx: number) {
-    const week = weeks[widx];
-    const mine = week.assignments.filter(a => a.person === person);
-    const totalLoad = mine.reduce((s, a) => s + a.weight, 0);
-    return { items: mine, totalLoad, totalCount: mine.length };
-  }
-
+  // ---------- UI Components ----------
   function Dashboard() {
+    if (!settings) return null;
     return (
       <div className="p-4 space-y-4">
         {weeks.map((week, widx) => (
           <div key={week.week} className="rounded-xl border p-3">
             <div className="font-semibold mb-2">Week {week.week}</div>
             <div className="grid md:grid-cols-3 gap-3">
-              {people.map(p => {
-                const { items, totalLoad, totalCount } = groupedListFor(p.name, widx);
+              {people.map((p) => {
+                const mine = week.assignments.filter((a) => a.person === p.name);
+                const totalLoad = mine.reduce((s, a) => s + a.weight, 0);
                 return (
-                  <div key={p.name} className="rounded-lg border p-3">
+                  <div key={p.id} className="rounded-lg border p-3">
                     <div className="font-medium mb-1">
-                      {p.name} <span className="text-xs text-slate-500">({totalCount} chores • load {totalLoad})</span>
+                      {p.name}{" "}
+                      <span className="text-xs text-slate-500">
+                        ({mine.length} chores • load {totalLoad})
+                      </span>
                     </div>
                     <ul className="text-sm list-disc pl-4">
-                      {items.map((it, i) => (
+                      {mine.map((it, i) => (
                         <li key={i}>
-                          {it.choreName}
-                          {` (${it.freq.charAt(0).toUpperCase() + it.freq.slice(1).replace(/_/g, " ")})`}
-                          {it.area ? ` [${it.area}]` : ""} (w{it.weight})
+                          {it.choreName}{" "}
+                          <span className="text-xs">
+                            ({it.freq.replace(/_/g, " ")})
+                            {it.area ? ` [${it.area}]` : ""} (w{it.weight})
+                          </span>
                         </li>
                       ))}
                     </ul>
@@ -204,61 +235,249 @@ export default function App() {
   }
 
   function EditChores() {
-    const [newChore, setNewChore] = useState<Chore>({ id: chores.length + 1, name: "", area: "", weight: 2, freq: "weekly" });
+    const [newChore, setNewChore] = useState<Chore>({
+      id: 0,
+      name: "",
+      area: "",
+      weight: 2,
+      freq: "weekly",
+    });
+
+    async function addChore() {
+      if (!newChore.name.trim()) return;
+      await supabase.from("chores").insert([
+        {
+          name: newChore.name.trim(),
+          area: newChore.area || null,
+          weight: Number(newChore.weight) || 1,
+          freq: newChore.freq,
+        },
+      ]);
+      setNewChore({ id: 0, name: "", area: "", weight: 2, freq: "weekly" });
+    }
+
+    async function updateChore(c: Chore, patch: Partial<Chore>) {
+      await supabase.from("chores").update(patch).eq("id", c.id);
+    }
+
+    async function removeChore(c: Chore) {
+      await supabase.from("chores").delete().eq("id", c.id);
+    }
+
     return (
       <div className="p-4 space-y-4">
         <div className="text-xl font-semibold">Edit Chores</div>
         <p className="text-sm text-red-600">
-          ⚠️ Changes here only apply to your device/browser. Other housemates won’t see them.
+          ⚠️ Changes here are saved to the shared database and will be visible to everyone immediately.
         </p>
-        {chores.map(c => (
-          <div key={c.id} className="flex gap-2">
-            <input value={c.name} onChange={e => setChores(prev => prev.map(x => x.id === c.id ? { ...x, name: e.target.value } : x))} />
-            <button onClick={() => setChores(prev => prev.filter(x => x.id !== c.id))}>Remove</button>
-          </div>
-        ))}
-        <input value={newChore.name} onChange={e => setNewChore({ ...newChore, name: e.target.value })} placeholder="New chore" />
-        <button onClick={() => setChores([...chores, { ...newChore, id: chores.length + 1 }])}>Add</button>
+
+        <div className="space-y-2">
+          {chores.map((c) => (
+            <div key={c.id} className="grid grid-cols-12 gap-2 items-center">
+              <input
+                className="col-span-3 border rounded px-2 py-1"
+                value={c.name}
+                onChange={(e) => updateChore(c, { name: e.target.value })}
+              />
+              <input
+                className="col-span-3 border rounded px-2 py-1"
+                placeholder="Area"
+                value={c.area || ""}
+                onChange={(e) => updateChore(c, { area: e.target.value })}
+              />
+              <input
+                className="col-span-2 border rounded px-2 py-1"
+                type="number"
+                min={1}
+                value={c.weight}
+                onChange={(e) => updateChore(c, { weight: Number(e.target.value) })}
+              />
+              <select
+                className="col-span-3 border rounded px-2 py-1"
+                value={c.freq}
+                onChange={(e) => updateChore(c, { freq: e.target.value as FreqKey })}
+              >
+                <option value="weekly">weekly</option>
+                <option value="every_2_weeks">every_2_weeks</option>
+                <option value="monthly">monthly</option>
+                <option value="quarterly">quarterly</option>
+              </select>
+              <button
+                className="col-span-1 text-red-600"
+                onClick={() => removeChore(c)}
+                title="Remove chore"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 grid grid-cols-12 gap-2">
+          <input
+            className="col-span-3 border rounded px-2 py-1"
+            placeholder="Chore name"
+            value={newChore.name}
+            onChange={(e) => setNewChore({ ...newChore, name: e.target.value })}
+          />
+          <input
+            className="col-span-3 border rounded px-2 py-1"
+            placeholder="Area"
+            value={newChore.area || ""}
+            onChange={(e) => setNewChore({ ...newChore, area: e.target.value })}
+          />
+          <input
+            className="col-span-2 border rounded px-2 py-1"
+            type="number"
+            min={1}
+            value={newChore.weight}
+            onChange={(e) => setNewChore({ ...newChore, weight: Number(e.target.value) })}
+          />
+          <select
+            className="col-span-3 border rounded px-2 py-1"
+            value={newChore.freq}
+            onChange={(e) => setNewChore({ ...newChore, freq: e.target.value as FreqKey })}
+          >
+            <option value="weekly">weekly</option>
+            <option value="every_2_weeks">every_2_weeks</option>
+            <option value="monthly">monthly</option>
+            <option value="quarterly">quarterly</option>
+          </select>
+          <button className="col-span-1 border rounded px-2 py-1" onClick={addChore}>
+            Add
+          </button>
+        </div>
       </div>
     );
   }
 
-  function Settings() {
-    const [peopleText, setPeopleText] = useState(people.map(p => p.name).join(", "));
+  function SettingsTab() {
+    const [minC, setMinC] = useState<number>(settings?.minChores ?? 8);
+    const [maxC, setMaxC] = useState<number>(settings?.maxChores ?? 10);
+    const [newPerson, setNewPerson] = useState("");
+
+    useEffect(() => {
+      if (settings) {
+        setMinC(settings.minChores);
+        setMaxC(settings.maxChores);
+      }
+    }, [settings]);
+
+    async function saveSettings() {
+      if (!settings) return;
+      await supabase
+        .from("settings")
+        .update({ minChores: minC, maxChores: maxC })
+        .eq("id", settings.id);
+    }
+
+    async function addPerson() {
+      const name = newPerson.trim();
+      if (!name) return;
+      await supabase.from("people").insert([{ name }]);
+      setNewPerson("");
+    }
+
+    async function removePerson(p: Person) {
+      await supabase.from("people").delete().eq("id", p.id);
+    }
+
     return (
-      <div className="p-4 space-y-4">
-        <div className="text-xl font-semibold">Settings</div>
-        <p className="text-sm text-red-600">
-          ⚠️ Changes here only apply to your device/browser. Other housemates won’t see them.
-        </p>
+      <div className="p-4 space-y-6">
         <div>
-          <label>Housemates</label>
-          <input value={peopleText} onChange={e => setPeopleText(e.target.value)} />
-          <button onClick={() => setPeople(peopleText.split(",").map(n => ({ name: n.trim() })))}>Save</button>
+          <div className="text-xl font-semibold mb-1">Settings</div>
+          <p className="text-sm text-red-600">
+            ⚠️ These settings are shared. Edits here will affect everyone immediately.
+          </p>
         </div>
-        <div>
-          <label>Min chores</label>
-          <input type="number" value={minChores} onChange={e => setMinChores(Number(e.target.value))} />
+
+        <div className="space-y-3">
+          <label className="block text-sm">Min chores / person / week</label>
+          <input
+            className="border rounded px-2 py-1"
+            type="number"
+            min={0}
+            value={minC}
+            onChange={(e) => setMinC(Number(e.target.value))}
+          />
         </div>
-        <div>
-          <label>Max chores</label>
-          <input type="number" value={maxChores} onChange={e => setMaxChores(Number(e.target.value))} />
+
+        <div className="space-y-3">
+          <label className="block text-sm">Max chores / person / week</label>
+          <input
+            className="border rounded px-2 py-1"
+            type="number"
+            min={0}
+            value={maxC}
+            onChange={(e) => setMaxC(Number(e.target.value))}
+          />
         </div>
-        <button onClick={() => { localStorage.removeItem(APP_STORAGE_KEY); setPeople(DEFAULT_PEOPLE); setChores(DEFAULT_CHORES); setMinChores(DEFAULT_MIN); setMaxChores(DEFAULT_MAX); }}>Clear Saved Data</button>
+
+        <button className="border rounded px-3 py-1" onClick={saveSettings}>
+          Save Settings
+        </button>
+
+        <div className="mt-6">
+          <div className="font-medium mb-2">Housemates</div>
+          <div className="space-y-2">
+            {people.map((p) => (
+              <div key={p.id} className="flex items-center gap-3">
+                <div className="px-2 py-1 rounded bg-slate-100">{p.name}</div>
+                <button className="text-red-600" onClick={() => removePerson(p)}>
+                  remove
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <input
+              className="border rounded px-2 py-1"
+              placeholder="Add housemate"
+              value={newPerson}
+              onChange={(e) => setNewPerson(e.target.value)}
+            />
+            <button className="border rounded px-3 py-1" onClick={addPerson}>
+              Add
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
+  // ---------- Shell ----------
   return (
     <div className="max-w-6xl mx-auto">
-      <div className="flex gap-4 p-2">
-        <button onClick={() => setTab("dashboard")}>Dashboard</button>
-        <button onClick={() => setTab("edit")}>Edit Chores</button>
-        <button onClick={() => setTab("settings")}>Settings</button>
+      <div className="flex gap-4 p-3 border-b">
+        <button
+          className={`px-3 py-1 rounded ${tab === "dashboard" ? "bg-slate-200" : "bg-white"}`}
+          onClick={() => setTab("dashboard")}
+        >
+          Dashboard
+        </button>
+        <button
+          className={`px-3 py-1 rounded ${tab === "edit" ? "bg-slate-200" : "bg-white"}`}
+          onClick={() => setTab("edit")}
+        >
+          Edit Chores
+        </button>
+        <button
+          className={`px-3 py-1 rounded ${tab === "settings" ? "bg-slate-200" : "bg-white"}`}
+          onClick={() => setTab("settings")}
+        >
+          Settings
+        </button>
       </div>
-      {tab === "dashboard" && <Dashboard />}
-      {tab === "edit" && <EditChores />}
-      {tab === "settings" && <Settings />}
+
+      {loading && <div className="p-4 text-sm text-slate-600">Loading…</div>}
+      {error && <div className="p-4 text-sm text-red-600">Error: {error}</div>}
+      {!loading && !error && (
+        <>
+          {tab === "dashboard" && <Dashboard />}
+          {tab === "edit" && <EditChores />}
+          {tab === "settings" && <SettingsTab />}
+        </>
+      )}
     </div>
   );
 }
