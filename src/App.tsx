@@ -94,7 +94,7 @@ export default function App() {
           const monthlyChores = chores.filter(c => c.freq === "monthly");
           const index = monthlyChores.findIndex(c => c.id === chore.id);
           if (index === -1) return 0;
-          const assignedWeek = index % 4; // 0→Week1, 1→Week2, 2→Week3, 3→Week4
+          const assignedWeek = index % 4;
           return (widx % 4 === assignedWeek) ? 1 : 0;
         }
 
@@ -208,6 +208,9 @@ export default function App() {
     return (
       <div className="p-4 space-y-4">
         <div className="text-xl font-semibold">Edit Chores</div>
+        <p className="text-sm text-red-600">
+          ⚠️ Changes here only apply to your device/browser. Other housemates won’t see them.
+        </p>
         {chores.map(c => (
           <div key={c.id} className="flex gap-2">
             <input value={c.name} onChange={e => setChores(prev => prev.map(x => x.id === c.id ? { ...x, name: e.target.value } : x))} />
@@ -225,6 +228,9 @@ export default function App() {
     return (
       <div className="p-4 space-y-4">
         <div className="text-xl font-semibold">Settings</div>
+        <p className="text-sm text-red-600">
+          ⚠️ Changes here only apply to your device/browser. Other housemates won’t see them.
+        </p>
         <div>
           <label>Housemates</label>
           <input value={peopleText} onChange={e => setPeopleText(e.target.value)} />
